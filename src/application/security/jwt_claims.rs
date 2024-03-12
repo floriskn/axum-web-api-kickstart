@@ -1,20 +1,17 @@
 use axum::{
     async_trait,
-    extract::{FromRef, FromRequestParts},
+    extract::{ FromRef, FromRequestParts },
     http::request::Parts,
     RequestPartsExt,
 };
-use axum_extra::{
-    headers::{authorization::Bearer, Authorization},
-    TypedHeader,
-};
-use serde::{Deserialize, Serialize};
+use axum_extra::{ headers::{ authorization::Bearer, Authorization }, TypedHeader };
+use serde::{ Deserialize, Serialize };
 use std::sync::Arc;
 
 use crate::application::{
     config,
     api_error::ApiError,
-    security::{self, auth_error::*},
+    security::{ self, auth_error::* },
     state::SharedState,
 };
 
@@ -136,24 +133,21 @@ fn is_role_admin(roles: &str) -> Result<(), AuthError> {
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for AccessClaims
-where
-    SharedState: FromRef<S>,
-    S: Send + Sync,
-{
+impl<S> FromRequestParts<S> for AccessClaims where SharedState: FromRef<S>, S: Send + Sync {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        decode_token_from_request_part(parts, state).await
+        let result: Result<AccessClaims, ApiError> = decode_token_from_request_part(
+            parts,
+            state
+        ).await;
+
+        return result;
     }
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for RefreshClaims
-where
-    SharedState: FromRef<S>,
-    S: Send + Sync,
-{
+impl<S> FromRequestParts<S> for RefreshClaims where SharedState: FromRef<S>, S: Send + Sync {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
@@ -161,19 +155,15 @@ where
     }
 }
 
-async fn decode_token_from_request_part<S, T>(
-    parts: &mut Parts,
-    state: &S,
-) -> Result<T, ApiError>
-where
-    SharedState: FromRef<S>,
-    S: Send + Sync,
-    T: for<'de> serde::Deserialize<'de> + std::fmt::Debug + ClaimsMethods,
+async fn decode_token_from_request_part<S, T>(parts: &mut Parts, state: &S) -> Result<T, ApiError>
+    where
+        SharedState: FromRef<S>,
+        S: Send + Sync,
+        T: for<'de> serde::Deserialize<'de> + std::fmt::Debug + ClaimsMethods
 {
     // extract the token from the authorization header
     let TypedHeader(Authorization(bearer)) = parts
-        .extract::<TypedHeader<Authorization<Bearer>>>()
-        .await
+        .extract::<TypedHeader<Authorization<Bearer>>>().await
         .map_err(|_| {
             tracing::error!("Invalid authorization header");
             AuthError::WrongCredentials
@@ -185,7 +175,7 @@ where
     // check for revoked tokens if enabled by configuration
     if config::get().jwt_enable_revoked_tokens {
         let shared_state: SharedState = Arc::from_ref(state);
-        jwt_auth::validate_revoked(&claims, &shared_state).await?
+        jwt_auth::validate_revoked(&claims, &shared_state).await?;
     }
     Ok(claims)
 }
@@ -194,10 +184,14 @@ pub fn decode_token<T: for<'de> serde::Deserialize<'de>>(token: &str) -> Result<
     let config = config::get();
     let mut validation = jsonwebtoken::Validation::default();
     validation.leeway = config.jwt_validation_leeway_seconds as u64;
-    let token_data = jsonwebtoken::decode::<T>(token, &config.jwt_keys.decoding, &validation)
-        .map_err(|_| {
+    let token_data = jsonwebtoken
+        ::decode::<T>(token, &config.jwt_keys.decoding, &validation)
+        .map_err(|e| {
             tracing::error!("Invalid token: {}", token);
-            AuthError::WrongCredentials
+            match e.kind() {
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::ExpiredToken,
+                _ => AuthError::WrongCredentials,
+            }
         })?;
 
     Ok(token_data.claims)

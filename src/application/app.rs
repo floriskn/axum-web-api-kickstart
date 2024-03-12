@@ -1,14 +1,13 @@
 use crate::{
     api::router,
-    application::{config, state::AppState},
-    infrastructure::{postgres, redis},
+    application::{ config, state::AppState },
+    infrastructure::{ postgres, redis },
 };
 use std::sync::Arc;
-use tokio::{
-    signal,
-    sync::{oneshot, Mutex},
-};
-use tower_http::cors::{Any, CorsLayer};
+use hyper::header::{ ACCEPT, AUTHORIZATION, CONTENT_TYPE };
+use sqlx::migrate;
+use tokio::{ signal, sync::{ oneshot, Mutex } };
+use tower_http::cors::{ Any, CorsLayer };
 
 pub async fn start_server(api_ready: oneshot::Sender<()>) {
     // load configuration
@@ -22,15 +21,14 @@ pub async fn start_server(api_ready: oneshot::Sender<()>) {
     let pgpool = postgres::pgpool(config).await;
 
     // run migrations
-    sqlx::migrate!("src/infrastructure/postgres/migrations")
-        .run(&pgpool)
-        .await
-        .unwrap();
+    migrate!("src/infrastructure/postgres/migrations").run(&pgpool).await.unwrap();
 
     // build a CORS layer
     // see https://docs.rs/tower-http/latest/tower_http/cors/index.html
     // for more details
-    let cors_layer = CorsLayer::new().allow_origin(Any);
+    let cors_layer = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);
     // let cors_header_value = config.service_http_addr().parse::<HeaderValue>().unwrap();
     // let cors_layer = CorsLayer::new()
     //      .allow_origin(cors_header_value)
@@ -54,7 +52,8 @@ pub async fn start_server(api_ready: oneshot::Sender<()>) {
     });
 
     // build the app
-    let app = router::routes(shared_state)
+    let app = router
+        ::routes(shared_state)
         .layer(cors_layer)
         .layer(axum::middleware::from_fn(router::logging_middleware));
 
@@ -65,27 +64,22 @@ pub async fn start_server(api_ready: oneshot::Sender<()>) {
     api_ready.send(()).expect("Couild not send a ready signal");
 
     // start the service
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
+    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.unwrap();
 
     tracing::info!("server shutdown successfully.");
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
+        signal::unix
+            ::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
-            .recv()
-            .await;
+            .recv().await;
     };
 
     #[cfg(not(unix))]

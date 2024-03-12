@@ -1,12 +1,12 @@
 use axum::{
     async_trait,
-    extract::{FromRequestParts, Path},
-    http::{request::Parts, StatusCode},
+    extract::{ FromRequestParts, Path },
+    http::{ request::Parts, StatusCode },
     RequestPartsExt,
 };
 use std::collections::HashMap;
 
-use super::api_error::ApiError;
+use super::api_error::{ ApiError, ApiErrorType };
 
 #[derive(Debug, Clone, Copy)]
 pub enum ApiVersion {
@@ -39,26 +39,25 @@ pub fn parse_version(version: &str) -> Result<ApiVersion, ApiError> {
     match version.parse() {
         Ok(v) => Ok(v),
         Err(_) => {
-            Err(ApiVersionError::InvalidApiVersion(format!("Unknown API Version: {}", version)).into())
-        },
+            Err(
+                ApiVersionError::InvalidApiVersion(
+                    format!("Unknown API Version: {}", version)
+                ).into()
+            )
+        }
     }
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for ApiVersion
-where
-    S: Send + Sync,
-{
+impl<S> FromRequestParts<S> for ApiVersion where S: Send + Sync {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let params: Path<HashMap<String, String>> = parts.extract().await.map_err(|_| {
-            ApiVersionError::VersionExtractError
-        })?;
+        let params: Path<HashMap<String, String>> = parts
+            .extract().await
+            .map_err(|_| { ApiVersionError::VersionExtractError })?;
 
-        let version = params
-            .get("version")
-            .ok_or(ApiVersionError::ParameterMissing)?;
+        let version = params.get("version").ok_or(ApiVersionError::ParameterMissing)?;
 
         parse_version(version)
     }
@@ -77,17 +76,14 @@ impl From<ApiVersionError> for ApiError {
             ApiVersionError::InvalidApiVersion(error_message) => {
                 (StatusCode::NOT_ACCEPTABLE, error_message)
             }
-            ApiVersionError::ParameterMissing => (
-                StatusCode::NOT_ACCEPTABLE,
-                "parameter is missing: version".to_owned(),
-            ),
-            ApiVersionError::VersionExtractError => (
-                StatusCode::BAD_REQUEST,
-                "Could not extract api version".to_owned(),
-            ),
+            ApiVersionError::ParameterMissing =>
+                (StatusCode::NOT_ACCEPTABLE, "parameter is missing: version".to_owned()),
+            ApiVersionError::VersionExtractError =>
+                (StatusCode::BAD_REQUEST, "Could not extract api version".to_owned()),
         };
         ApiError {
             status_code,
+            error_type: ApiErrorType::Version,
             error_message,
         }
     }

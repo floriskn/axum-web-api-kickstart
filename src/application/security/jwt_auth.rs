@@ -1,13 +1,17 @@
 use crate::{
     application::{
-        api_error::ApiError, config, redis_service, repository::user_repo, state::SharedState,
+        api_error::{ ApiError, ApiErrorType },
+        config,
+        redis_service,
+        repository::user_repo,
+        state::SharedState,
     },
     domain::models::user::User,
 };
 use hyper::StatusCode;
 use uuid::Uuid;
 
-use super::{auth_error::*, jwt_claims::*};
+use super::{ auth_error::*, jwt_claims::* };
 
 pub struct JwtTokens {
     pub access_token: String,
@@ -29,7 +33,7 @@ pub async fn logout(refresh_claims: RefreshClaims, state: SharedState) -> Result
 
 pub async fn refresh(
     refresh_claims: RefreshClaims,
-    state: SharedState,
+    state: SharedState
 ) -> Result<JwtTokens, ApiError> {
     // decode and validate the refresh token
     if !validate_token_type(&refresh_claims, JwtTokenType::RefreshToken) {
@@ -49,13 +53,14 @@ pub async fn refresh(
 
     Err(ApiError {
         status_code: StatusCode::UNPROCESSABLE_ENTITY,
+        error_type: ApiErrorType::Api,
         error_message: format!("user not found: {}", user_id),
     })
 }
 
 pub async fn cleanup_revoked_and_expired(
     _access_claims: &AccessClaims,
-    state: &SharedState,
+    state: &SharedState
 ) -> Result<usize, ApiError> {
     // checking the configuration if the usage of the list of revoked tokens is enabled
     if !config::get().jwt_enable_revoked_tokens {
@@ -70,20 +75,20 @@ pub async fn cleanup_revoked_and_expired(
 }
 
 pub fn validate_token_type(claims: &RefreshClaims, expected_type: JwtTokenType) -> bool {
-    if claims.typ == expected_type as u8 {
+    if claims.typ == (expected_type as u8) {
         return true;
     }
     tracing::error!(
         "Invalid token type. Expected {:?}, Found {:?}",
         expected_type,
-        JwtTokenType::from(claims.typ),
+        JwtTokenType::from(claims.typ)
     );
     false
 }
 
 async fn revoke_refresh_token(
     refresh_claims: &RefreshClaims,
-    state: &SharedState,
+    state: &SharedState
 ) -> Result<(), ApiError> {
     // check the validity of refresh token
     validate_revoked(refresh_claims, state).await?;
@@ -102,9 +107,16 @@ pub fn generate_tokens(user: User) -> JwtTokens {
 
     let access_token_id = Uuid::new_v4().to_string();
     let refresh_token_id = Uuid::new_v4().to_string();
-    let access_token_exp = (time_now
-        + chrono::Duration::seconds(config.jwt_expire_access_token_seconds))
-    .timestamp() as usize;
+
+    let access_token_exp_config = chrono::Duration
+        ::try_seconds(config.jwt_expire_access_token_seconds)
+        .unwrap();
+
+    let refresh_token_exp_config = chrono::Duration
+        ::try_seconds(config.jwt_expire_refresh_token_seconds)
+        .unwrap();
+
+    let access_token_exp = (time_now + access_token_exp_config).timestamp() as usize;
 
     let access_claims = AccessClaims {
         sub: sub.clone(),
@@ -119,8 +131,7 @@ pub fn generate_tokens(user: User) -> JwtTokens {
         sub,
         jti: refresh_token_id,
         iat,
-        exp: (time_now + chrono::Duration::seconds(config.jwt_expire_refresh_token_seconds))
-            .timestamp() as usize,
+        exp: (time_now + refresh_token_exp_config).timestamp() as usize,
         prf: access_token_id,
         pex: access_token_exp,
         typ: JwtTokenType::RefreshToken as u8,
@@ -133,19 +144,22 @@ pub fn generate_tokens(user: User) -> JwtTokens {
         refresh_claims
     );
 
-    let access_token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &access_claims,
-        &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret.as_ref()),
-    )
-    .unwrap();
+    // TODO: remove unwarps generate internal server error
+    let access_token = jsonwebtoken
+        ::encode(
+            &jsonwebtoken::Header::default(),
+            &access_claims,
+            &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret.as_ref())
+        )
+        .unwrap();
 
-    let refresh_token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &refresh_claims,
-        &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret.as_ref()),
-    )
-    .unwrap();
+    let refresh_token = jsonwebtoken
+        ::encode(
+            &jsonwebtoken::Header::default(),
+            &refresh_claims,
+            &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret.as_ref())
+        )
+        .unwrap();
 
     tracing::info!(
         "JWT: generated tokens\naccess {:#?}\nrefresh {:#?}",
@@ -161,7 +175,7 @@ pub fn generate_tokens(user: User) -> JwtTokens {
 
 pub async fn validate_revoked<T: std::fmt::Debug + ClaimsMethods>(
     claims: &T,
-    state: &SharedState,
+    state: &SharedState
 ) -> Result<(), ApiError> {
     match redis_service::is_revoked(claims, state).await {
         Some(revoked) => {
@@ -169,7 +183,9 @@ pub async fn validate_revoked<T: std::fmt::Debug + ClaimsMethods>(
                 return Err(AuthError::WrongCredentials.into());
             }
         }
-        None => return Err(StatusCode::INTERNAL_SERVER_ERROR.into()),
+        None => {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+        }
     }
     Ok(())
 }
