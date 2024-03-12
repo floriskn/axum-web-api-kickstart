@@ -1,7 +1,16 @@
-use axum::{ extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router };
+use axum::{
+    extract::{ rejection::JsonRejection, State },
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+    Json,
+    Router,
+};
+use axum_extra::extract::WithRejection;
 use serde::{ Deserialize, Serialize };
 use serde_json::json;
 use uuid::Uuid;
+use thiserror::Error;
 
 use crate::application::{
     api_error::ApiError,
@@ -37,6 +46,29 @@ pub fn routes() -> Router<SharedState> {
         .route("/cleanup", post(cleanup_handler))
 }
 
+#[derive(Debug, Error)]
+pub enum ApiJsonRejectionError {
+    #[error(transparent)] JsonExtractorRejection(#[from] JsonRejection),
+}
+
+impl IntoResponse for ApiJsonRejectionError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match self {
+            ApiJsonRejectionError::JsonExtractorRejection(json_rejection) => {
+                (json_rejection.status(), json_rejection.body_text())
+            }
+        };
+
+        let payload =
+            json!({
+            "message": message,
+            "origin": "with_rejection"
+        });
+
+        (status, Json(payload)).into_response()
+    }
+}
+
 #[tracing::instrument(
     level = tracing::Level::TRACE,
     name = "login",
@@ -46,7 +78,7 @@ pub fn routes() -> Router<SharedState> {
 async fn login_handler(
     api_version: ApiVersion,
     State(state): State<SharedState>,
-    Json(login): Json<LoginUser>
+    WithRejection(Json(login), _): WithRejection<Json<LoginUser>, ApiJsonRejectionError>
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::trace!("api version: {}", api_version);
     if let Some(user) = user_repo::get_user_by_username(&login.username, &state).await {
