@@ -1,11 +1,11 @@
-use axum::{ extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router };
+use axum::{ extract::State, http::StatusCode, response::IntoResponse, routing::post, Router };
 use serde::{ Deserialize, Serialize };
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::application::{
     api_error::ApiError,
-    api_version::ApiVersion,
+    api_json::Json,
     redis_service,
     repository::user_repo,
     security::{
@@ -45,11 +45,9 @@ pub fn routes() -> Router<SharedState> {
     fields(username = login.username)
 )]
 async fn login_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     Json(login): Json<LoginUser>
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     if let Some(user) = user_repo::get_user_by_username(&login.username, &state).await {
         if user.active && verify_password(&user.password, login.password.as_bytes()).is_ok() {
             tracing::trace!("access granted, user: {}", user.id);
@@ -64,32 +62,26 @@ async fn login_handler(
 }
 
 async fn logout_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     refresh_claims: RefreshClaims
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("refresh_claims: {:?}", refresh_claims);
     jwt_auth::logout(refresh_claims, state).await
 }
 
 async fn refresh_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     refresh_claims: RefreshClaims
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     let new_tokens = jwt_auth::refresh(refresh_claims, state).await?;
     Ok(tokens_to_response(new_tokens))
 }
 
 // revoke all issued tokens until now
 async fn revoke_all_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     access_claims: AccessClaims
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     access_claims.validate_role_admin()?;
     if !redis_service::revoke_global(&state).await {
         return Err(ApiError::from(StatusCode::INTERNAL_SERVER_ERROR));
@@ -99,12 +91,10 @@ async fn revoke_all_handler(
 
 // revoke tokens issued to user until now
 async fn revoke_user_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     access_claims: AccessClaims,
     Json(revoke_user): Json<RevokeUser>
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     if access_claims.sub != revoke_user.user_id.to_string() {
         // only admin can revoke tokens of other users
         access_claims.validate_role_admin()?;
@@ -117,11 +107,9 @@ async fn revoke_user_handler(
 }
 
 async fn cleanup_handler(
-    api_version: ApiVersion,
     State(state): State<SharedState>,
     access_claims: AccessClaims
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     access_claims.validate_role_admin()?;
     tracing::trace!("authentication details: {:#?}", access_claims);
     let deleted = jwt_auth::cleanup_revoked_and_expired(&access_claims, &state).await?;

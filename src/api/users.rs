@@ -1,9 +1,8 @@
 use axum::{
-    extract::{ Path, State },
+    extract::State,
     http::StatusCode,
     response::IntoResponse,
     routing::{ delete, get, post, put },
-    Json,
     Router,
 };
 use sqlx::types::Uuid;
@@ -11,7 +10,8 @@ use sqlx::types::Uuid;
 use crate::{
     application::{
         api_error::{ ApiError, ApiErrorType },
-        api_version::{ self, ApiVersion },
+        api_json::Json,
+        api_path::Path,
         repository::user_repo,
         security::jwt_claims::{ AccessClaims, ClaimsMethods },
         state::SharedState,
@@ -29,11 +29,9 @@ pub fn routes() -> Router<SharedState> {
 }
 
 async fn list_users_handler(
-    api_version: ApiVersion,
     access_claims: AccessClaims,
     State(state): State<SharedState>
 ) -> Result<Json<Vec<User>>, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("authentication details: {:#?}", access_claims);
     access_claims.validate_role_admin()?;
     match user_repo::all_users(&state).await {
@@ -43,12 +41,10 @@ async fn list_users_handler(
 }
 
 async fn add_user_handler(
-    api_version: ApiVersion,
     access_claims: AccessClaims,
     State(state): State<SharedState>,
     Json(user): Json<User>
 ) -> Result<impl IntoResponse, ApiError> {
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("authentication details: {:#?}", access_claims);
     access_claims.validate_role_admin()?;
     match user_repo::add_user(user, &state).await {
@@ -59,11 +55,9 @@ async fn add_user_handler(
 
 async fn get_user_handler(
     access_claims: AccessClaims,
-    Path((version, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
     State(state): State<SharedState>
 ) -> Result<Json<User>, ApiError> {
-    let api_version: ApiVersion = api_version::parse_version(&version)?;
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("authentication details: {:#?}", access_claims);
     tracing::trace!("id: {}", id);
     access_claims.validate_role_admin()?;
@@ -75,12 +69,10 @@ async fn get_user_handler(
 
 async fn update_user_handler(
     access_claims: AccessClaims,
-    Path((version, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
     State(state): State<SharedState>,
     Json(user): Json<User>
 ) -> Result<Json<User>, ApiError> {
-    let api_version: ApiVersion = api_version::parse_version(&version)?;
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("authentication details: {:#?}", access_claims);
     tracing::trace!("id: {}", id);
     access_claims.validate_role_admin()?;
@@ -92,11 +84,9 @@ async fn update_user_handler(
 
 async fn delete_user_handler(
     access_claims: AccessClaims,
-    Path((version, id)): Path<(String, Uuid)>,
+    Path(id): Path<Uuid>,
     State(state): State<SharedState>
 ) -> Result<impl IntoResponse, ApiError> {
-    let api_version: ApiVersion = api_version::parse_version(&version)?;
-    tracing::trace!("api version: {}", api_version);
     tracing::trace!("authentication details: {:#?}", access_claims);
     tracing::trace!("id: {}", id);
     access_claims.validate_role_admin()?;
