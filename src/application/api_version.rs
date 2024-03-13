@@ -83,7 +83,7 @@ impl From<ApiVersionError> for ApiError {
         };
         ApiError {
             status_code,
-            error_type: ApiErrorType::Version,
+            error_type: ApiErrorType::Api,
             error_message,
         }
     }

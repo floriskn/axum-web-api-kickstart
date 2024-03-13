@@ -1,16 +1,7 @@
-use axum::{
-    extract::{ rejection::JsonRejection, State },
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-    Json,
-    Router,
-};
-use axum_extra::extract::WithRejection;
+use axum::{ extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router };
 use serde::{ Deserialize, Serialize };
 use serde_json::json;
 use uuid::Uuid;
-use thiserror::Error;
 
 use crate::application::{
     api_error::ApiError,
@@ -21,6 +12,7 @@ use crate::application::{
         auth_error::AuthError,
         jwt_auth::{ self, JwtTokens },
         jwt_claims::{ AccessClaims, ClaimsMethods, RefreshClaims },
+        password::verify_password,
     },
     state::SharedState,
 };
@@ -28,7 +20,7 @@ use crate::application::{
 #[derive(Debug, Serialize, Deserialize)]
 struct LoginUser {
     username: String,
-    password_hash: String,
+    password: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,29 +38,6 @@ pub fn routes() -> Router<SharedState> {
         .route("/cleanup", post(cleanup_handler))
 }
 
-#[derive(Debug, Error)]
-pub enum ApiJsonRejectionError {
-    #[error(transparent)] JsonExtractorRejection(#[from] JsonRejection),
-}
-
-impl IntoResponse for ApiJsonRejectionError {
-    fn into_response(self) -> axum::response::Response {
-        let (status, message) = match self {
-            ApiJsonRejectionError::JsonExtractorRejection(json_rejection) => {
-                (json_rejection.status(), json_rejection.body_text())
-            }
-        };
-
-        let payload =
-            json!({
-            "message": message,
-            "origin": "with_rejection"
-        });
-
-        (status, Json(payload)).into_response()
-    }
-}
-
 #[tracing::instrument(
     level = tracing::Level::TRACE,
     name = "login",
@@ -78,11 +47,11 @@ impl IntoResponse for ApiJsonRejectionError {
 async fn login_handler(
     api_version: ApiVersion,
     State(state): State<SharedState>,
-    WithRejection(Json(login), _): WithRejection<Json<LoginUser>, ApiJsonRejectionError>
+    Json(login): Json<LoginUser>
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::trace!("api version: {}", api_version);
     if let Some(user) = user_repo::get_user_by_username(&login.username, &state).await {
-        if user.active && user.password_hash == login.password_hash {
+        if user.active && verify_password(&user.password, login.password.as_bytes()).is_ok() {
             tracing::trace!("access granted, user: {}", user.id);
             let tokens = jwt_auth::generate_tokens(user);
             let response = tokens_to_response(tokens);

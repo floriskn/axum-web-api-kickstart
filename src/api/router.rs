@@ -1,20 +1,21 @@
 use axum::{
     body::Body,
-    extract::{Path, Query, Request},
-    http::{HeaderMap, Method, StatusCode},
+    extract::{ Path, Request },
+    http::{ Method, StatusCode },
     middleware::Next,
-    response::{IntoResponse, Response},
-    routing::{any, get},
-    Json, Router,
+    response::{ IntoResponse, Response },
+    routing::get,
+    Json,
+    Router,
 };
 use serde_json::json;
 use std::collections::HashMap;
 
-use super::{auth, users};
+use super::{ auth, users };
 
 use crate::application::{
-    api_error::ApiError,
-    api_version::{self, ApiVersion},
+    api_error::{ ApiError, ApiErrorType },
+    api_version::{ self, ApiVersion },
     app_const::*,
     security::jwt_claims::AccessClaims,
     state::SharedState,
@@ -25,7 +26,6 @@ pub fn routes(state: SharedState) -> Router {
     Router::new()
         .route("/", get(root_handler))
         .route("/head", get(head_request_handler))
-        .route("/any", any(any_request_handler))
         .route("/:version/heartbeat/:id", get(heartbeat_handler))
         // nesting the authentication related routes
         .nest("/:version/auth", auth::routes())
@@ -36,19 +36,21 @@ pub fn routes(state: SharedState) -> Router {
         .with_state(state)
 }
 
-#[tracing::instrument(level = tracing::Level::TRACE, name = "axum", skip_all, fields(method=request.method().to_string(), uri=request.uri().to_string()))]
+#[tracing::instrument(
+    level = tracing::Level::TRACE,
+    name = "axum",
+    skip_all,
+    fields(method = request.method().to_string(), uri = request.uri().to_string())
+)]
 pub async fn logging_middleware(request: Request<Body>, next: Next) -> Response {
-    tracing::trace!(
-        "received a {} request to {}",
-        request.method(),
-        request.uri()
-    );
+    tracing::trace!("received a {} request to {}", request.method(), request.uri());
     next.run(request).await
 }
 
-async fn heartbeat_handler(
-    Path((version, id)): Path<(String, String)>,
-) -> Result<impl IntoResponse, ApiError> {
+async fn heartbeat_handler(Path((version, id)): Path<(String, String)>) -> Result<
+    impl IntoResponse,
+    ApiError
+> {
     let api_version: ApiVersion = api_version::parse_version(&version)?;
     tracing::trace!("heartbeat: api version: {}", api_version);
     tracing::trace!("heartbeat: received id: {}", id);
@@ -88,23 +90,11 @@ async fn head_request_handler(method: Method) -> Response {
     ([("x-some-header", "header from GET")], "body from GET").into_response()
 }
 
-async fn any_request_handler(
-    method: Method,
-    headers: HeaderMap,
-    Query(params): Query<HashMap<String, String>>,
-    request: Request,
-) -> impl IntoResponse {
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("method: {:?}", method);
-        tracing::debug!("headers: {:?}", headers);
-        tracing::debug!("params: {:?}", params);
-        tracing::debug!("request: {:?}", request);
-    }
-
-    StatusCode::OK
-}
-
 async fn error_404_handler(request: Request) -> impl IntoResponse {
     tracing::error!("route not found: {:?}", request);
-    StatusCode::NOT_FOUND
+    ApiError {
+        error_message: "Route not found".to_owned(),
+        error_type: ApiErrorType::Api,
+        status_code: StatusCode::NOT_FOUND,
+    }
 }

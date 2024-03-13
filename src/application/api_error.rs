@@ -8,8 +8,6 @@ use super::security::auth_error::AuthError;
 pub enum ApiErrorType {
     Auth(AuthError),
     Api,
-    Version,
-    Undefined,
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +38,7 @@ impl From<StatusCode> for ApiError {
     fn from(status_code: StatusCode) -> Self {
         ApiError {
             status_code,
-            error_type: ApiErrorType::Undefined,
+            error_type: ApiErrorType::Api,
             error_message: status_code.to_string(),
         }
     }

@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
-use serde::{Deserialize, Serialize};
-use sqlx::{types::Uuid, FromRow};
+use serde::{ Deserialize, Serialize };
+use sqlx::{ types::Uuid, FromRow };
 
 use crate::application::security;
 
@@ -9,8 +9,7 @@ pub struct User {
     pub id: Uuid,
     pub username: String,
     pub email: String,
-    pub password_hash: String,
-    pub password_salt: String,
+    pub password: String,
     pub active: bool,
     pub roles: String,
     pub created_at: Option<NaiveDateTime>,
