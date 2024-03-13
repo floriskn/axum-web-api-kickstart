@@ -4,7 +4,7 @@ use crate::{
     infrastructure::{ postgres, redis },
 };
 use std::sync::Arc;
-use hyper::header::{ ACCEPT, AUTHORIZATION, CONTENT_TYPE };
+use hyper::{ header::{ ACCEPT, AUTHORIZATION, CONTENT_TYPE }, Method };
 use sqlx::migrate;
 use tokio::{ signal, sync::{ oneshot, Mutex } };
 use tower_http::cors::{ Any, CorsLayer };
@@ -28,6 +28,7 @@ pub async fn start_server(api_ready: oneshot::Sender<()>) {
     // for more details
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)
+        .allow_methods([Method::HEAD, Method::GET, Method::POST, Method::PATCH, Method::DELETE])
         .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);
     // let cors_header_value = config.service_http_addr().parse::<HeaderValue>().unwrap();
     // let cors_layer = CorsLayer::new()
